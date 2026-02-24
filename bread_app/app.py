@@ -7,14 +7,31 @@ from dotenv import load_dotenv
 from collections import defaultdict
 from datetime import datetime
 
-load_dotenv()
-
 app = Flask(__name__)
 
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 MODEL_NAME = "arcee-ai/trinity-large-preview:free"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CSV_FILE = os.path.normpath(os.path.join(BASE_DIR, "..", "data.csv"))
+ENV_FILE = os.path.normpath(os.path.join(BASE_DIR, "..", ".env"))
+load_dotenv(dotenv_path=ENV_FILE)
+
+
+def resolve_csv_file():
+    # Railway filesystem is ephemeral unless using a mounted volume.
+    data_dir = (
+        os.getenv("DATA_DIR")
+        or os.getenv("RAILWAY_VOLUME_MOUNT_PATH")
+        or os.path.normpath(os.path.join(BASE_DIR, ".."))
+    )
+    try:
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, "data.csv")
+    except OSError:
+        fallback_dir = "/tmp" if os.name != "nt" else os.path.normpath(os.path.join(BASE_DIR, ".."))
+        os.makedirs(fallback_dir, exist_ok=True)
+        return os.path.join(fallback_dir, "data.csv")
+
+
+CSV_FILE = resolve_csv_file()
 CSV_HEADERS = [
     "ID",
     "Tanggal",
@@ -41,6 +58,16 @@ MONTH_NAMES_ID = {
     11: "November",
     12: "Desember",
 }
+
+
+def get_openrouter_api_key():
+    key = (
+        os.getenv("OPENROUTER_API_KEY")
+        or os.getenv("OPEN_ROUTER_API_KEY")
+        or os.getenv("OPENROUTER_KEY")
+        or ""
+    ).strip()
+    return key.strip("'\"")
 
 
 def safe_float(value, default=0.0):
@@ -185,6 +212,17 @@ def index():
     return render_template("index.html", grouped_history=grouped_history, history_count=len(history))
 
 
+@app.route("/health")
+def health():
+    return jsonify(
+        {
+            "status": "ok",
+            "api_key_configured": bool(get_openrouter_api_key()),
+            "data_file": CSV_FILE,
+        }
+    )
+
+
 @app.route("/calculate", methods=["POST"])
 def calculate():
     data = request.json or {}
@@ -206,11 +244,12 @@ def calculate():
         f"Laba bersih: {profit}. Berikan 3 saran strategi singkat dalam Bahasa Indonesia."
     )
 
-    if OPENROUTER_API_KEY:
+    api_key = get_openrouter_api_key()
+    if api_key:
         try:
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 data=json.dumps(
                     {
                         "model": MODEL_NAME,
@@ -299,7 +338,7 @@ def clear_all():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False)
 
 
 
