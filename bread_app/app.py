@@ -3,8 +3,11 @@ import requests
 import json
 import csv
 import os
+from dotenv import load_dotenv
 from collections import defaultdict
 from datetime import datetime
+
+load_dotenv()
 
 app = Flask(__name__)
 
